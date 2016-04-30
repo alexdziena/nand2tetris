@@ -1,0 +1,107 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+        // ARegister logic
+        Not(in=instruction[15],out=ainst);
+        Mux16(a=ALUout,b=instruction,sel=ainst,out=ain);
+        Or(a=ainst,b=instruction[5],out=loada);
+        ARegister(in=ain,load=loada,out=aout,out[0..14]=addressM);
+
+        // DRegister logic
+        And(a=instruction[15],b=instruction[4],out=loadd);
+        DRegister(in=ALUout,load=loadd,out=ALUx);
+
+        // if(instruction[15] && b=instruction[12]) {ALUy == inM}
+        // else{ALUy == aout}
+        And(a=instruction[15],b=instruction[12],out=AorM);
+        Mux16(a=aout,b=inM,sel=AorM,out=ALUy);
+
+        ALU(x=ALUx,y=ALUy,
+            zx=instruction[11], // Zero the x input
+            nx=instruction[10], // Negate the x input
+            zy=instruction[9], // Zero the y input
+            ny=instruction[8], // Negate the y input
+            f=instruction[7],  // Function code: 1 for add, 0 for and
+            no=instruction[6], // Negate the out output
+    
+            out=ALUout,
+            out=outM,
+            zr=ALUzr, // 1 if out=0, 0 otherwise
+            ng=ALUng // 1 if out<0, 0 otherwise
+        );
+        And(a=instruction[15],b=instruction[3],out=writeM);
+
+        DMux8Way(in=true,sel[0]=instruction[0],sel[1]=instruction[1],sel[2]=instruction[2],
+            a=nojmp,
+            b=jgt,
+            c=jeq,
+            d=jge,
+            e=jlt,
+            f=jne,
+            g=jle,
+            h=ncjmp
+        );
+
+        Or(a=ALUzr,b=ALUng,out=le);
+        Not(in=le,out=positive);
+        Or(a=ALUzr,b=positive,out=ge);
+        Not(in=ALUzr,out=ne);
+
+        And(a=ALUzr,b=jeq,out=ojeq);
+        And(a=positive,b=jgt,out=ojgt);
+        And(a=ge,b=jge,out=ojge);
+        And(a=ALUng,b=jlt,out=ojlt);
+        And(a=ne,b=jne,out=ojne);
+        And(a=le,b=jle,out=ojle);
+
+        Or8Way(
+            in[0]=ojeq,
+            in[1]=ojgt,
+            in[2]=ojge,
+            in[3]=ojlt,
+            in[4]=ojne,
+            in[5]=ojle,
+            in[6]=ncjmp,
+            in[7]=false,
+            out=jmp);
+        And(a=jmp,b=instruction[15],out=loadjmp);
+        PC(in=aout, load=loadjmp, inc=true, reset=reset, out[0..14]=pc);
+}
